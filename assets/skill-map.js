@@ -1,6 +1,6 @@
-import { CATEGORIES, DIFFICULTIES, EQUIPMENT, TRACKS } from './catalog.js';
-import { targetFor } from './store.js?v=3';
-import { button, field, format, meter, option, safe } from './views.js?v=3';
+import { CATEGORIES, DIFFICULTIES, EQUIPMENT, TRACKS } from './catalog.js?v=4';
+import { targetFor } from './store.js?v=4';
+import { button, field, format, meter, option, safe } from './views.js?v=4';
 
 const categories = new Map(CATEGORIES.map(category => [category.id, category]));
 const paths = [...TRACKS, ...CATEGORIES.map(category => ({
@@ -55,19 +55,17 @@ export function treeSelection(skills, filters) {
   }
   const matchingTracks = new Set(matches.map(skill => skill.track));
   const choices = paths.filter(path => matchingTracks.has(path.id));
-  const overview = filters.path === OVERVIEW;
-  const path = overview ? null : choices.find(path => path.id === filters.path) ??
-    choices.find(path => path.id === matches[0]?.track) ?? null;
-  return { matches, choices, overview, path, active: Boolean(query || filters.gear || filters.tier) };
+  const path = choices.find(path => path.id === filters.path) ?? null;
+  return { matches, choices, overview: !path, path, active: Boolean(query || filters.gear || filters.tier) };
 }
 
-function mapOptions(choices, selected) {
+function mapOptions(choices, selected, scoped) {
   const groups = CATEGORIES.map(category => {
     const options = choices.filter(path => path.category === category.id);
     return options.length ? `<optgroup label="${category.name}">${options.map(path =>
       option(path.id, path.name, selected)).join('')}</optgroup>` : '';
   }).join('');
-  return option(OVERVIEW, 'All paths overview', selected) + groups;
+  return option(OVERVIEW, scoped ? 'Category overview' : 'All paths overview', selected) + groups;
 }
 
 function nodeForSkill(context, skill, reference) {
@@ -101,21 +99,31 @@ export function progressionGraph(context, path) {
   return { kind: 'progression', nodes, edges };
 }
 
-function overviewGraph(matches, context) {
+function countSkills(matches, mastered, key) {
   const counts = new Map();
   for (const skill of matches) {
-    const bucket = counts.get(skill.category) ?? { total: 0, mastered: 0 };
+    const id = skill[key];
+    const bucket = counts.get(id) ?? { total: 0, mastered: 0 };
     bucket.total++;
-    if (context.progress.mastered.has(skill.id)) bucket.mastered++;
-    counts.set(skill.category, bucket);
+    if (mastered.has(skill.id)) bucket.mastered++;
+    counts.set(id, bucket);
   }
-  const nodes = [{ id: OVERVIEW, name: 'Skill paths', color: '#d2f26e', glyph: '✧', status: 'overview',
+  return counts;
+}
+
+export function overviewGraph(matches, mastered, choices, categoryId) {
+  const category = categories.get(categoryId);
+  const counts = countSkills(matches, mastered, category ? 'track' : 'category');
+  const nodes = [{ id: OVERVIEW, name: category?.name ?? 'All skills',
+    color: category?.color ?? '#d2f26e', glyph: category?.icon ?? '✧', status: 'overview',
     caption: matches.length + ' skills', completion: 0 }];
-  for (const category of CATEGORIES) {
-    const count = counts.get(category.id);
+  for (const group of category ? choices : CATEGORIES) {
+    const count = counts.get(group.id);
     if (!count) continue;
+    const appearance = category ?? group;
     nodes.push({
-      id: category.id, name: category.name, color: category.color, glyph: category.icon, action: 'tree-filter',
+      id: group.id, name: group.name, color: appearance.color, glyph: appearance.icon,
+      action: category ? 'tree-open-path' : 'tree-filter',
       status: 'overview', completion: count.mastered / count.total, caption: count.mastered + ' / ' + count.total + ' mastered',
     });
   }
@@ -124,16 +132,16 @@ function overviewGraph(matches, context) {
 
 export function mapLayout(graph, vertical) {
   if (graph.kind === 'overview') {
-    const width = vertical ? 410 : 825;
-    const height = vertical ? 540 : 460;
+    const width = vertical ? 360 : 825;
+    const height = vertical ? 390 : 460;
     const center = { x: width / 2, y: (height - 28) / 2 };
     return {
       width, height, radial: true,
       nodes: graph.nodes.map((node, index) => {
         const angle = -Math.PI / 2 + (index - 1) * 2 * Math.PI / (graph.nodes.length - 1);
         return { ...node,
-          x: index ? center.x + Math.cos(angle) * (vertical ? 133 : 297) : center.x,
-          y: index ? center.y + Math.sin(angle) * (vertical ? 169 : 149) : center.y,
+          x: index ? center.x + Math.cos(angle) * (vertical ? 119 : 297) : center.x,
+          y: index ? center.y + Math.sin(angle) * (vertical ? 125 : 149) : center.y,
         };
       }),
     };
@@ -484,21 +492,54 @@ function mountStage(root, graph, filters, active, matchIds, jumpTo) {
   return () => { resize.disconnect(); events.abort(); };
 }
 
+function pathIndex(choices, matches, mastered) {
+  const counts = countSkills(matches, mastered, 'track');
+  const groups = CATEGORIES.map(category => {
+    const tracks = choices.filter(path => path.category === category.id);
+    if (!tracks.length) return '';
+    return `<div class="map-path-group" style="--category:${category.color}">
+      <h3><span aria-hidden="true">${category.icon}</span>${category.name}</h3>
+      ${tracks.map(path => {
+        const count = counts.get(path.id);
+        return `<button type="button" class="map-path-link" data-action="tree-open-path" data-id="${safe(path.id)}">
+          <span>${safe(path.name)}</span><small aria-label="${count.mastered} of ${count.total} mastered">${count.mastered} / ${count.total}</small></button>`;
+      }).join('')}
+    </div>`;
+  }).join('');
+  return `<section class="panel map-paths"><h2>Progression paths <small>${choices.length}</small></h2>
+    <div class="map-path-index">${groups}</div></section>`;
+}
+
+function advancedIndex(skills, progress) {
+  const parents = new Set(skills.flatMap(skill => skill.prereqs.flat()));
+  const advanced = skills.filter(skill => skill.tier >= 4).sort((a, b) => b.tier - a.tier ||
+    Number(parents.has(a.id)) - Number(parents.has(b.id)));
+  if (!advanced.length) return '';
+  return `<section class="panel map-matches" aria-label="Advanced skills on this path">
+    <h2>Advanced skills</h2><div>${advanced.map(skill => {
+      const status = progress.statuses.get(skill.id);
+      return `<button type="button" class="chip" data-action="tree-spotlight" data-id="${safe(skill.id)}">
+        ${safe(skill.name)}<small>${DIFFICULTIES[skill.tier - 1]} · ${status[0].toUpperCase() + status.slice(1)}</small></button>`;
+    }).join('')}</div></section>`;
+}
+
 export function mountTree(target, context, filters) {
   const { matches, choices, overview, path, active } = treeSelection(context.skills, filters);
   filters.path = overview ? OVERVIEW : path?.id ?? '';
-  target.parentElement.querySelector('#tree-path').innerHTML = mapOptions(choices, filters.path);
+  target.parentElement.querySelector('#tree-path').innerHTML = mapOptions(choices, filters.path, filters.category !== 'all');
   target.parentElement.querySelector('#tree-path').disabled = matches.length === 0;
   target.parentElement.querySelector('[data-map-filter-active]').hidden = !filters.gear && !filters.tier;
   for (const chip of target.parentElement.querySelectorAll('.map-categories [data-action="tree-filter"]')) {
-    chip.setAttribute('aria-pressed', String(chip.dataset.id === filters.category));
+    const selected = chip.dataset.id === filters.category && (overview || filters.category !== 'all');
+    chip.setAttribute('aria-pressed', String(selected));
   }
   if (!matches.length) {
     target.innerHTML = '<section class="panel"><p class="empty-copy" role="status">No skills match these filters.</p></section>';
     return () => {};
   }
   const usedSkills = overview ? matches : context.skills.filter(skill => skill.track === path.id);
-  const graph = overview ? overviewGraph(matches, context) : progressionGraph(context, path);
+  const { mastered } = context.progress;
+  const graph = overview ? overviewGraph(matches, mastered, choices, filters.category) : progressionGraph(context, path);
   const achieved = usedSkills.filter(skill => context.progress.mastered.has(skill.id)).length;
   const summary = achieved + ' / ' + usedSkills.length + ' mastered';
   const visibleMatchIds = new Set(matches.map(skill => skill.id));
@@ -510,13 +551,16 @@ export function mountTree(target, context, filters) {
       return `<button type="button" class="chip" data-action="tree-spotlight" data-id="${safe(skill.id)}">
         ${safe(skill.name)}<small>${safe(track?.name)}</small></button>`;
     }).join('')}</div></section>` : '';
-  const mapLegend = overview ? '<span>Select a category to open its progressions.</span>' : [
+  const overviewTitle = categories.has(filters.category) ? categories.get(filters.category).name + ' progressions' : 'All progression paths';
+  const outline = overview ? pathIndex(choices, matches, mastered) :
+    advancedIndex(usedSkills.filter(skill => visibleMatchIds.has(skill.id)), context.progress);
+  const mapLegend = overview ? `<span>Select a ${filters.category === 'all' ? 'category' : 'path'} to explore.</span>` : [
     ['available', 'Available'], ['training', 'Training'], ['mastered', 'Mastered'],
     ['locked', 'Locked'], ['alternate', 'Alternate route'],
   ].map(([status, name]) => `<span><i class="map-key-${status}"></i>${name}</span>`).join('');
   target.innerHTML = `${results}<section class="panel map-panel" aria-label="Interactive skill map">
     <header class="map-head">
-      <div class="map-title"><h2>${safe(overview ? 'All progression paths' : path.name)}</h2>
+      <div class="map-title"><h2>${safe(overview ? overviewTitle : path.name)}</h2>
         <p>${summary}</p>${meter(achieved, usedSkills.length, 'Path mastery')}</div>
       <div class="map-zoom" role="group" aria-label="Map zoom">
         <button type="button" class="btn quiet icon-button" data-map-control="out" aria-label="Zoom out">−</button>
@@ -526,7 +570,7 @@ export function mountTree(target, context, filters) {
         <button type="button" class="btn quiet icon-button" data-map-control="reset" aria-label="Return to starting view" title="Return to starting view">⌂</button>
       </div>
     </header>
-    <div class="map-stage" tabindex="0" data-map-path="${safe(filters.path)}" aria-label="Skill map"
+    <div class="map-stage" tabindex="0" data-map-path="${safe(overview ? OVERVIEW + ':' + filters.category : path.id)}" aria-label="Skill map"
       aria-describedby="map-instructions">
       <div class="map-world"><canvas aria-hidden="true"></canvas><div class="map-nodes"></div></div>
     </div>
@@ -537,7 +581,7 @@ export function mountTree(target, context, filters) {
         <span class="sr-only">Use the arrow keys to move, plus or minus to zoom, and F to fit the map.</span>
       </p>
     </footer>
-  </section>`;
+  </section>${outline}`;
   const jump = filters.jump ? filters.focus : !overview && active ? matches.find(skill => skill.track === path.id)?.id : '';
   filters.jump = false;
   return mountStage(target, graph, filters, active, visibleMatchIds, jump);

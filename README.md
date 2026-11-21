@@ -1,7 +1,7 @@
 # Ascent
 
-Ascent is a free, single-user calisthenics tracker. The skill tree has 192
-built-in progressions across 20 paths. Every skill includes technique notes,
+Ascent is a free, single-user calisthenics tracker. The skill tree has 348
+built-in progressions across 25 paths. Every skill includes technique notes,
 a tutorial, prerequisites, and a target you can change.
 
 ## Run locally
@@ -35,7 +35,9 @@ external pages on request.
 
 - **Today** shows your level, skills, weekly quests, and next suggested skill.
   Start a workout or open Routines to select a template.
-- **Skill tree** shows each path as a map. Follow the connections to see
+- **Skill tree** opens with all seven categories and a list of every progression
+  path. Select a category or path to explore it. Within a path, use **Advanced
+  skills** to jump to harder progressions. Follow the connections to see
   prerequisites and look for dashed lines where there are alternate routes.
   Drag to move, pinch or use the zoom controls, and select **Fit** to see the
   whole path. Open a node to see its tutorial, prerequisites, unlocks, and

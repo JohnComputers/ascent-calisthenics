@@ -1,5 +1,5 @@
-import { CATEGORIES, DIFFICULTIES, STARTER_ROUTINES } from './catalog.js';
-import { addDays, dateLabel, dayKey, fromKg, targetFor, weekStart } from './store.js?v=3';
+import { CATEGORIES, DIFFICULTIES, STARTER_ROUTINES } from './catalog.js?v=4';
+import { addDays, dateLabel, dayKey, fromKg, targetFor, weekStart } from './store.js?v=4';
 
 export const safe = value => String(value ?? '').replace(/[&<>"']/g, char =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);

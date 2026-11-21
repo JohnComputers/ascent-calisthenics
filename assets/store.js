@@ -1,4 +1,4 @@
-import { CATALOG, CATEGORIES, EQUIPMENT } from './catalog.js';
+import { CATALOG, CATEGORIES, EQUIPMENT } from './catalog.js?v=4';
 
 export const BACKUP_VERSION = 2;
 const collections = ['workouts', 'customSkills', 'routines', 'rewards', 'redemptions'];

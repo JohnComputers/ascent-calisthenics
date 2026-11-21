@@ -1,13 +1,13 @@
-import { CATEGORIES, DIFFICULTIES, EQUIPMENT, STARTER_ROUTINES } from './catalog.js';
+import { CATEGORIES, DIFFICULTIES, EQUIPMENT, STARTER_ROUTINES } from './catalog.js?v=4';
 import {
   readState, transact, getSkills, createId, putRecord, removeRecord, dayKey, fromKg, toKg,
   numberOrNull, progressFor, validateState, makeBackup, readBackup, mergeBackup, isSafeUrl, setManualMastery,
-} from './store.js?v=3';
+} from './store.js?v=4';
 import {
   safe, button, field, option, formatSet, unitName, topbar, railLevel, todayView,
   skillDetails, skillOptions, setFields, logView, historyView, workoutDetails, rewardsView,
-} from './views.js?v=3';
-import { treeView, mountTree } from './skill-map.js?v=3';
+} from './views.js?v=4';
+import { treeView, mountTree } from './skill-map.js?v=4';
 
 const main = document.querySelector('#main');
 const dialog = document.querySelector('#app-dialog');
@@ -145,6 +145,8 @@ function highlightSkill(id, resetFilters = false) {
     dialog.close();
     navigate('tree');
   } else renderTreeResults();
+  main.querySelector('button[data-map-node="' + CSS.escape(id) + '"]')?.focus({ preventScroll: true });
+  main.querySelector('.map-head')?.scrollIntoView({ block: 'start' });
 }
 
 function sessionFields() {
@@ -444,6 +446,12 @@ const actions = {
     Object.assign(filters, { category: id, path: '', focus: '', jump: false });
     renderTreeResults();
   },
+  'tree-open-path': path => {
+    Object.assign(filters, { path, focus: '', jump: false });
+    renderTreeResults();
+    main.querySelector('.map-stage')?.focus({ preventScroll: true });
+    main.querySelector('.map-head')?.scrollIntoView({ block: 'start' });
+  },
   'tree-spotlight': id => highlightSkill(id),
   'tree-locate': id => highlightSkill(id, true),
   skill: openSkill,
@@ -711,7 +719,6 @@ document.addEventListener('change', event => {
   const element = event.target;
   if (element.id === 'tree-path') {
     Object.assign(filters, { path: element.value, focus: '', jump: false });
-    if (element.value === 'overview') filters.category = 'all';
     renderTreeResults();
   } else if (element.id === 'gear-filter' || element.id === 'tier-filter') {
     filters[element.id === 'gear-filter' ? 'gear' : 'tier'] = element.value;
