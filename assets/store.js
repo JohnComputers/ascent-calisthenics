@@ -1,13 +1,13 @@
 import { CATALOG, CATEGORIES, EQUIPMENT } from './catalog.js';
 
-export const BACKUP_VERSION = 1;
+export const BACKUP_VERSION = 2;
 const collections = ['workouts', 'customSkills', 'routines', 'rewards', 'redemptions'];
 const deletable = ['workouts', 'routines', 'rewards'];
 
 export function emptyState() {
   return {
     workouts: [], customSkills: [], routines: [], rewards: [], redemptions: [],
-    targets: {}, draft: null,
+    targets: {}, manualMastery: {}, draft: null,
     removed: { workouts: {}, routines: {}, rewards: {} },
     prefs: { unit: 'lb', weeklyWorkouts: 3, updatedAt: 0 },
   };
@@ -134,6 +134,14 @@ export function targetFor(skill, state) {
   return state.targets[skill.id]?.value ?? skill.target;
 }
 
+export function setManualMastery(state, id, mastered) {
+  if (!getSkills(state).some(skill => skill.id === id)) throw new Error('This skill is no longer available.');
+  const marks = state.manualMastery ??= {};
+  const existing = marks[id];
+  if (existing?.mastered === mastered) return;
+  marks[id] = { mastered, updatedAt: Math.max(Date.now(), (existing?.updatedAt ?? 0) + 1) };
+}
+
 function emptyRecord() {
   return { best: 0, bestDate: null, left: 0, right: 0, qualityBest: 0,
     count: 0, maxLoad: null, minAssist: null };
@@ -194,8 +202,8 @@ export function progressFor(state, skills = getSkills(state), today = new Date()
     }
   }
 
-  const mastered = new Set(skills.filter(skill => (records.get(skill.id)?.qualityBest ?? 0)
-    >= targetFor(skill, state)).map(skill => skill.id));
+  const mastered = new Set(skills.filter(skill => state.manualMastery?.[skill.id]?.mastered ||
+    (records.get(skill.id)?.qualityBest ?? 0) >= targetFor(skill, state)).map(skill => skill.id));
   const statuses = new Map();
   for (const skill of skills) {
     const unlocked = skill.prereqs.length === 0 ||
@@ -342,6 +350,9 @@ export function validateState(state) {
   must(isObject(state.targets) && Object.entries(state.targets).every(([id, target]) =>
     byId.has(id) && isObject(target) && stamp(target.updatedAt) &&
     Number.isInteger(target.value) && amount(target.value, 1, 86400)));
+  must(state.manualMastery === undefined || isObject(state.manualMastery) &&
+    Object.entries(state.manualMastery).every(([id, mark]) => byId.has(id) && isObject(mark) &&
+      typeof mark.mastered === 'boolean' && stamp(mark.updatedAt)));
   must(isObject(state.prefs) && ['kg', 'lb'].includes(state.prefs.unit) && stamp(state.prefs.updatedAt) &&
     Number.isInteger(state.prefs.weeklyWorkouts) && amount(state.prefs.weeklyWorkouts, 1, 14));
   must(isObject(state.removed));
@@ -353,7 +364,10 @@ export function validateState(state) {
 }
 
 export function makeBackup(state) {
-  return { app: 'Ascent Calisthenics', version: BACKUP_VERSION, exportedAt: new Date().toISOString(), state };
+  return {
+    app: 'Ascent Calisthenics', version: BACKUP_VERSION, exportedAt: new Date().toISOString(),
+    state: { ...state, manualMastery: state.manualMastery ?? {} },
+  };
 }
 
 export function readBackup(text) {
@@ -363,13 +377,16 @@ export function readBackup(text) {
   } catch {
     throw new Error('This file is not valid JSON.');
   }
-  must(backup?.app === 'Ascent Calisthenics' && backup.version === BACKUP_VERSION,
+  must(backup?.app === 'Ascent Calisthenics' && [1, BACKUP_VERSION].includes(backup.version),
     'Choose an Ascent backup supported by this version.');
   return validateState(backup.state);
 }
 
 export function mergeBackup(current, incoming) {
-  const merged = { ...current, removed: { ...current.removed }, targets: { ...current.targets } };
+  const merged = {
+    ...current, removed: { ...current.removed }, targets: { ...current.targets },
+    manualMastery: { ...current.manualMastery },
+  };
   for (const collection of deletable) {
     const removed = { ...current.removed[collection] };
     for (const [id, stamp] of Object.entries(incoming.removed[collection])) {
@@ -389,6 +406,13 @@ export function mergeBackup(current, incoming) {
   }
   for (const [id, target] of Object.entries(incoming.targets)) {
     if (!merged.targets[id] || target.updatedAt > merged.targets[id].updatedAt) merged.targets[id] = target;
+  }
+  for (const [id, mark] of Object.entries(incoming.manualMastery ?? {})) {
+    const existing = Object.hasOwn(merged.manualMastery, id) ? merged.manualMastery[id] : null;
+    if (!existing || mark.updatedAt > existing.updatedAt ||
+      mark.updatedAt === existing.updatedAt && !mark.mastered) {
+      merged.manualMastery[id] = mark;
+    }
   }
   if (incoming.prefs.updatedAt > current.prefs.updatedAt) merged.prefs = incoming.prefs;
   if (!current.draft && incoming.draft) {

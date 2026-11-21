@@ -1,17 +1,18 @@
 import { CATEGORIES, DIFFICULTIES, EQUIPMENT, STARTER_ROUTINES } from './catalog.js';
 import {
   readState, transact, getSkills, createId, putRecord, removeRecord, dayKey, fromKg, toKg,
-  numberOrNull, progressFor, validateState, makeBackup, readBackup, mergeBackup, isSafeUrl,
-} from './store.js';
+  numberOrNull, progressFor, validateState, makeBackup, readBackup, mergeBackup, isSafeUrl, setManualMastery,
+} from './store.js?v=3';
 import {
-  safe, button, field, option, formatSet, unitName, topbar, railLevel, todayView, treeView,
-  treeResults, skillDetails, skillOptions, setFields, logView, historyView, workoutDetails, rewardsView,
-} from './views.js';
+  safe, button, field, option, formatSet, unitName, topbar, railLevel, todayView,
+  skillDetails, skillOptions, setFields, logView, historyView, workoutDetails, rewardsView,
+} from './views.js?v=3';
+import { treeView, mountTree } from './skill-map.js?v=3';
 
 const main = document.querySelector('#main');
 const dialog = document.querySelector('#app-dialog');
 const toast = document.querySelector('#toast');
-const filters = { category: 'all', gear: '', tier: '', query: '', openTracks: new Map() };
+const filters = { category: 'all', gear: '', tier: '', query: '', path: '', focus: '', jump: false, cameras: new Map() };
 const routes = ['today', 'tree', 'history', 'rewards', 'log'];
 const listeners = typeof BroadcastChannel === 'function'
   ? new BroadcastChannel('ascent:' + new URL('../', import.meta.url).pathname) : null;
@@ -27,6 +28,7 @@ let lastHold = 0;
 let timer = { mode: 'idle', started: 0, end: 0 };
 let dialogOpener;
 let readback = Promise.resolve();
+let disposeTree;
 
 function getRoute() {
   const hash = location.hash.slice(1);
@@ -44,6 +46,8 @@ function selectDefaultExercise() {
 }
 
 function render() {
+  disposeTree?.();
+  disposeTree = undefined;
   refreshContext();
   document.querySelector('#topbar').innerHTML = topbar(route, context);
   document.querySelector('#rail-progress').innerHTML = railLevel(context.progress);
@@ -52,9 +56,10 @@ function render() {
     else link.removeAttribute('aria-current');
   }
   document.querySelector('.mobile-log').setAttribute('aria-pressed', String(route === 'log'));
-  const views = { today: todayView, tree: ctx => treeView(ctx, filters), history: historyView,
+  const views = { today: todayView, tree: () => treeView(filters), history: historyView,
     rewards: rewardsView, log: ctx => logView(ctx, logSkill) };
   main.innerHTML = views[route](context);
+  if (route === 'tree') renderTreeResults();
   if (route === 'log') syncTimer();
 }
 
@@ -113,9 +118,33 @@ function openSkill(id) {
   if (skill) showDialog(skill.name, skillDetails(context, skill));
 }
 
+async function saveMastery(id, mastered) {
+  await update(current => setManualMastery(current, id, mastered));
+  openSkill(id);
+  dialog.querySelector(mastered ? '[data-action="undo-mastery"]' : '[data-action="mark-mastered"]')?.focus();
+  notify(mastered ? 'Skill marked mastered.' : 'Manual mastery removed.');
+}
+
 function renderTreeResults() {
   const target = document.querySelector('#tree-results');
-  if (target) target.innerHTML = treeResults(context, filters);
+  if (!target) return;
+  disposeTree?.();
+  disposeTree = mountTree(target, context, filters);
+}
+
+function clearTreeSearch(category) {
+  Object.assign(filters, { category, query: '', gear: '', tier: '', path: '', focus: '', jump: false });
+}
+
+function highlightSkill(id, resetFilters = false) {
+  const skill = context.progress.byId.get(id);
+  if (!skill) return;
+  if (resetFilters) clearTreeSearch(skill.category);
+  Object.assign(filters, { path: skill.track, focus: id, jump: true });
+  if (resetFilters) {
+    dialog.close();
+    navigate('tree');
+  } else renderTreeResults();
 }
 
 function sessionFields() {
@@ -410,13 +439,16 @@ function downloadBackup() {
 }
 
 const actions = {
-  category: id => { filters.category = id; filters.query = ''; filters.gear = ''; filters.tier = ''; navigate('tree'); },
-  'tree-filter': (id, control) => {
-    filters.category = id;
-    for (const chip of document.querySelectorAll('[data-action="tree-filter"]')) chip.setAttribute('aria-pressed', String(chip === control));
+  category: id => { clearTreeSearch(id); navigate('tree'); },
+  'tree-filter': id => {
+    Object.assign(filters, { category: id, path: '', focus: '', jump: false });
     renderTreeResults();
   },
+  'tree-spotlight': id => highlightSkill(id),
+  'tree-locate': id => highlightSkill(id, true),
   skill: openSkill,
+  'mark-mastered': id => saveMastery(id, true),
+  'undo-mastery': id => saveMastery(id, false),
   'custom-skill': customSkillForm,
   'close-dialog': () => dialog.close(),
   settings: showSettings,
@@ -670,15 +702,20 @@ document.addEventListener('submit', event => {
 
 document.addEventListener('input', event => {
   if (event.target.id === 'skill-search') {
-    filters.query = event.target.value;
+    Object.assign(filters, { query: event.target.value, path: '', focus: '', jump: false });
     renderTreeResults();
   }
 });
 
 document.addEventListener('change', event => {
   const element = event.target;
-  if (element.id === 'gear-filter' || element.id === 'tier-filter') {
+  if (element.id === 'tree-path') {
+    Object.assign(filters, { path: element.value, focus: '', jump: false });
+    if (element.value === 'overview') filters.category = 'all';
+    renderTreeResults();
+  } else if (element.id === 'gear-filter' || element.id === 'tier-filter') {
     filters[element.id === 'gear-filter' ? 'gear' : 'tier'] = element.value;
+    filters.focus = '';
     renderTreeResults();
   } else if (element.id === 'exercise-select') chooseExercise(element.value);
   else if (element.closest('#session-meta') && element.form.checkValidity()) {
@@ -694,16 +731,11 @@ document.addEventListener('change', event => {
   }
 });
 
-document.addEventListener('toggle', event => {
-  const details = event.target;
-  if (details.dataset?.track && !filters.query.trim() && !filters.gear && !filters.tier) {
-    filters.openTracks.set(details.dataset.track, details.open);
-  }
-}, true);
-
 dialog.addEventListener('close', () => {
   pendingConfirmation = undefined;
-  if (dialogOpener?.isConnected) dialogOpener.focus({ preventScroll: true });
+  const opener = dialogOpener?.isConnected ? dialogOpener : dialogOpener?.dataset.action === 'skill'
+    ? main.querySelector(`button[data-action="skill"][data-id="${CSS.escape(dialogOpener.dataset.id)}"]`) : null;
+  opener?.focus({ preventScroll: true });
 });
 
 window.addEventListener('hashchange', () => {

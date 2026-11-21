@@ -35,10 +35,14 @@ external pages on request.
 
 - **Today** shows your level, skills, weekly quests, and next suggested skill.
   Start a workout or open Routines to select a template.
-- **Skill tree** groups skills into paths. Open a skill to see the tutorial,
-  prerequisites, what it unlocks, and your best set. Reaching the editable
-  target marks the skill as mastered. For one-sided skills, log both sides to
-  qualify. Standard skills count unassisted sets toward the target.
+- **Skill tree** shows each path as a map. Follow the connections to see
+  prerequisites and look for dashed lines where there are alternate routes.
+  Drag to move, pinch or use the zoom controls, and select **Fit** to see the
+  whole path. Open a node to see its tutorial, prerequisites, unlocks, and
+  best set. Select **Mark mastered** to complete the skill directly. You can
+  undo that mark. Workout sets can also meet the editable target. One-sided
+  skills require both sides for logged mastery. Standard skills count
+  unassisted sets toward the target.
 - **Workout log** saves your draft as you work. Choose an exercise, enter reps
   or seconds, and expand Set details for assistance, load, side, tempo, effort,
   rest, and notes. After your first set, the previous set fills the form.

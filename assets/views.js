@@ -1,5 +1,5 @@
-import { CATEGORIES, TRACKS, DIFFICULTIES, EQUIPMENT, STARTER_ROUTINES } from './catalog.js';
-import { addDays, dateLabel, dayKey, fromKg, targetFor, weekStart } from './store.js';
+import { CATEGORIES, DIFFICULTIES, STARTER_ROUTINES } from './catalog.js';
+import { addDays, dateLabel, dayKey, fromKg, targetFor, weekStart } from './store.js?v=3';
 
 export const safe = value => String(value ?? '').replace(/[&<>"']/g, char =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
@@ -140,62 +140,6 @@ export function todayView({ state, skills, progress }) {
   </div>`;
 }
 
-export function treeView(context, filters) {
-  const chips = [{ id: 'all', name: 'All skills' }, ...CATEGORIES].map(category =>
-    `<button type="button" class="chip" data-action="tree-filter" data-id="${category.id}"
-      aria-pressed="${filters.category === category.id}">${category.name}</button>`).join('');
-  return `<div class="stack">
-    <section class="panel filters" aria-label="Skill search and filters">
-      <div class="split wrap"><h2>Explore progressions</h2>${button('+ Custom skill', 'custom-skill', '', 'quiet')}</div>
-      <div class="chips" aria-label="Movement category">${chips}</div>
-      <div class="filter-fields">
-        ${field('Search skills', `<input id="skill-search" type="search" placeholder="Try pull-up or planche" value="${safe(filters.query)}">`)}
-        ${field('Equipment', `<select id="gear-filter">${option('', 'All gear', filters.gear)}
-          ${EQUIPMENT.map(gear => option(gear, gear, filters.gear)).join('')}</select>`)}
-        ${field('Difficulty', `<select id="tier-filter">${option('', 'Any level', filters.tier)}
-          ${DIFFICULTIES.map((tier, index) => option(index + 1, tier, filters.tier)).join('')}</select>`)}
-      </div>
-    </section>
-    <div id="tree-results" class="tree-results">${treeResults(context, filters)}</div>
-  </div>`;
-}
-
-export function treeResults({ skills, progress }, { category, query, gear, tier, openTracks }) {
-  const allTracks = [...TRACKS, ...CATEGORIES.map(category => ({
-    id: 'custom-' + category.id, category: category.id, name: 'Custom ' + category.name.toLowerCase() + ' skills',
-  }))];
-  const normalized = text => text.toLowerCase().replace(/[-–]/g, ' ');
-  const keywords = normalized(query).trim().split(/\s+/).filter(Boolean);
-  const matches = skills.filter(skill => (category === 'all' || category === skill.category)
-    && (!gear || skill.gear.includes(gear)) && (!tier || String(skill.tier) === tier)
-    && keywords.every(word => normalized(skill.name + ' ' + skill.gear.join(' ')).includes(word)));
-  if (!matches.length) return `<section class="panel">${empty('No skills match these filters.')}</section>`;
-  const tracks = allTracks.filter(track => matches.some(skill => skill.track === track.id));
-  const tiles = tracks.map(track => {
-    const cat = categoryById.get(track.category);
-    const path = matches.filter(skill => skill.track === track.id);
-    const open = keywords.length || gear || tier || (openTracks.has(track.id) ? openTracks.get(track.id) : track === tracks[0]);
-    const done = path.filter(skill => progress.mastered.has(skill.id)).length;
-    const cards = path.map(skill => {
-      const status = progress.statuses.get(skill.id);
-      const prereq = skill.prereqs.map(group => group.map(id => progress.byId.get(id)?.name).join(' + ')).join(' or ');
-      return `<li><button class="skill-card" type="button" data-action="skill" data-id="${safe(skill.id)}" data-status="${status}"
-        style="--category:${cat.color}">
-        <strong>${safe(skill.name)}</strong>
-        <small>${DIFFICULTIES[skill.tier - 1]} · ${safe(skill.gear[0])}</small>
-        ${statusTag(status)}
-        ${prereq ? `<small class="card-prereq">After ${safe(prereq)}</small>` : ''}
-      </button></li>`;
-    }).join('');
-    return `<details class="panel track" data-track="${track.id}" ${open ? 'open' : ''}>
-      <summary>${categoryIcon(cat)}<span class="track-name">${safe(track.name)}
-        <small>${done} / ${path.length} mastered</small></span></summary>
-      <ol class="track-path">${cards}</ol>
-    </details>`;
-  }).join('');
-  return `<p class="tree-count" role="status">${plural(matches.length, 'skill')} · ${plural(tracks.length, 'path')}</p>${tiles}`;
-}
-
 export function formatSet(skill, set, unit) {
   const value = skill.metric === 'seconds' ? format(set.value) + ' s' : plural(set.value, 'rep');
   const side = skill.each || set.side === 'left' || set.side === 'right'
@@ -221,6 +165,7 @@ export function skillDetails({ state, skills, progress }, skill) {
   const target = targetFor(skill, state);
   const metric = unitName(skill);
   const status = progress.statuses.get(skill.id);
+  const manual = state.manualMastery?.[skill.id]?.mastered === true;
   const cat = categoryById.get(skill.category);
   const next = skills.filter(candidate => candidate.prereqs.some(path => path.includes(skill.id)));
   const skillButton = id => button(progress.byId.get(id)?.name ?? id, 'skill', id, 'quiet small-btn');
@@ -233,21 +178,27 @@ export function skillDetails({ state, skills, progress }, skill) {
   const series = [...setsByDay].sort(([a], [b]) => a.localeCompare(b)).slice(-8)
     .map(([date, value]) => ({ label: dateLabel(date), short: date.slice(-2), value }));
 
-  return `<div class="pills">${statusTag(status)}<span class="tag">${cat.name}</span>
-    <span class="tag">${DIFFICULTIES[skill.tier - 1]}</span>${skill.gear.map(gear => `<span class="tag">${safe(gear)}</span>`).join('')}</div>
+  const masteryAction = manual ? button('Undo manual mastery', 'undo-mastery', skill.id, 'quiet') :
+    status === 'mastered' ? '' : button('Mark mastered', 'mark-mastered', skill.id, 'primary');
+  return `<div class="split wrap">
+    <div class="pills">${statusTag(status)}<span class="tag">${cat.name}</span>
+      <span class="tag">${DIFFICULTIES[skill.tier - 1]}</span>${skill.gear.map(gear => `<span class="tag">${safe(gear)}</span>`).join('')}</div>
+    ${masteryAction}
+  </div>
   <p>${safe(skill.description)}</p>
   <div class="skill-note"><strong>Form cue</strong><p>${safe(skill.cues)}</p></div>
   <div class="skill-note"><strong>Common mistake</strong><p>${safe(skill.mistakes)}</p></div>
   <div class="actions">
-    ${button('Log this skill', 'log-skill', skill.id, 'primary')}
+    ${button('Log this skill', 'log-skill', skill.id, 'quiet')}
     <a class="btn quiet" href="${safe(skill.url)}" target="_blank" rel="noopener noreferrer">Tutorial · ${safe(skill.source)}</a>
+    ${button('Show on map', 'tree-locate', skill.id, 'quiet')}
     ${skill.track.startsWith('custom-') ? button('Edit skill', 'custom-skill', skill.id, 'quiet') : ''}
   </div>
   <section class="panel stack">
-    <div><div class="split wrap"><h3>Mastery progress</h3><strong class="accent">${format(best)} / ${target} ${metric}</strong></div>
-      ${meter(best, target, 'Mastery progress')}
-      ${skill.each ? `<p class="muted"><small>Left ${format(record?.left ?? 0)} · Right ${format(record?.right ?? 0)} ${metric}</small></p>` : ''}
-      ${skill.weighted ? '<p class="muted"><small>Mastery counts sets with added weight.</small></p>' : ''}
+    <div><div class="split wrap"><h3>Logged progress</h3><strong class="accent">${format(best)} / ${target} ${metric}</strong></div>
+      ${meter(best, target, 'Logged progress toward target')}
+      ${skill.each && record ? `<p class="muted"><small>Left ${format(record.left)} · Right ${format(record.right)} ${metric}</small></p>` : ''}
+      ${skill.weighted ? '<p class="muted"><small>The target counts sets with added weight.</small></p>' : ''}
       ${record ? `<p class="muted"><small>Best logged ${format(record.best)} ${metric} · ${plural(record.count, 'set')}</small></p>` : ''}</div>
     <form class="split start" data-form="target" data-id="${safe(skill.id)}">
       ${field('Target (' + metric + ')', `<input name="target" type="number" inputmode="numeric" min="1" max="86400" step="1" value="${target}" required>`)}
